@@ -7,7 +7,6 @@ use anyhow::{bail, Context};
 use clap::Parser;
 use env_logger::{Builder, Target};
 use hdf5::filters::blosc_set_nthreads;
-use itertools::Itertools;
 use log::{self, LevelFilter};
 use ndarray::{arr0, s, Array1};
 use serde_json::Value;
@@ -120,13 +119,22 @@ fn main() -> anyhow::Result<()> {
         .create("note")?;
 
     // Now write the index datasets.
-    log::info!("Writing indexes...");
+    write_day_index(&file, index_day)?;
+    write_uuid_index(&file, index_uuid)?;
+    write_label_index(&file, index_label)?;
 
-    // Write the day-to-circ index.
-    let index = file.create_group("/index/day")?;
+    file.close()?;
+    log::info!("All done in {:?}!", main_start.elapsed());
+    Ok(())
+}
 
-    for (day, indices) in index_day.into_iter().sorted_by_key(|x| x.0) {
-        index
+fn write_day_index(file: &hdf5::File, index: HashMap::<u8, Vec<u32>>) -> anyhow::Result<()> {
+    log::info!("Writing global day index...");
+
+    let group = file.create_group("/index/day")?;
+
+    for (day, indices) in index.into_iter() {
+        group
             .new_dataset_builder()
             .with_data(&Array1::from_vec(indices))
             .create(format!("{day}").as_str())?;
@@ -135,22 +143,27 @@ fn main() -> anyhow::Result<()> {
     const DAY_NOTE: &str =
         "Provides a cached copy of the indices into the circuits dataset of those \
         circuits that were observed on a given day.";
-    index
+    group
         .new_attr_builder()
         .with_data(&arr0(fixedascii_from_str::<128>(DAY_NOTE)?))
         .create("note")?;
 
-    // Write the uuid-to-circ index.
-    let index = file.create_group("/index/uuid")?;
+    Ok(())
+}
 
-    for (uuid, indices) in index_uuid.into_iter().sorted_by_key(|x| x.0.clone()) {
+fn write_uuid_index(file: &hdf5::File, index: HashMap::<String, Vec<u32>>) -> anyhow::Result<()> {
+    log::info!("Writing global uuid index...");
+
+    let group = file.create_group("/index/uuid")?;
+
+    for (uuid, indices) in index.into_iter() {
         if indices.len() != 1 {
             bail!(
                 "Uuid should be unique but we found {} indices",
                 indices.len()
             );
         }
-        index
+        group
             .new_dataset_builder()
             .with_data(&arr0(indices[0]))
             .create(uuid.as_str())?;
@@ -159,17 +172,23 @@ fn main() -> anyhow::Result<()> {
     const UUID_NOTE: &str =
         "Provides a cached copy of the indices into the circuits dataset of the \
         circuit with the given uuid.";
-    index
+    group
         .new_attr_builder()
         .with_data(&arr0(fixedascii_from_str::<128>(UUID_NOTE)?))
         .create("note")?;
 
-    // Write the label-to-circ index.
-    let index = file.create_group("/index/label")?;
+    Ok(())
+}
 
-    for (label, indices) in index_label.into_iter().sorted_by_key(|x| x.0.clone()) {
+
+fn write_label_index(file: &hdf5::File, index: HashMap::<String, Vec<u32>>) -> anyhow::Result<()> {
+    log::info!("Writing global label index...");
+
+    let group = file.create_group("/index/label")?;
+
+    for (label, indices) in index.into_iter() {
         // We need the `replace("/", "_")` to maintain the path structure in the hdf5.
-        index
+        group
             .new_dataset_builder()
             .with_data(&Array1::from_vec(indices))
             .create(label.replace("/", "_").as_str())?;
@@ -180,17 +199,15 @@ fn main() -> anyhow::Result<()> {
         circuits that match the given label. The label is the circuit's \
         shortest_private_suffix, or the domain if the shortest_private_suffix \
         is null. The label path is modified to replace '/' with '_'.";
-    index
+    group
         .new_attr_builder()
         .with_data(&arr0(fixedascii_from_str::<512>(LABEL_NOTE)?))
         .create("note")?;
 
-    file.close()?;
-    log::info!("All done in {:?}!", main_start.elapsed());
     Ok(())
 }
 
-pub fn circuit_label(circ: &Circuit) -> anyhow::Result<String> {
+fn circuit_label(circ: &Circuit) -> anyhow::Result<String> {
     if circ.shortest_private_suffix != fixedascii_null::<44>()? {
         Ok(circ.shortest_private_suffix.to_string())
     } else {
