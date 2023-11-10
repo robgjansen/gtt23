@@ -7,6 +7,7 @@ use anyhow::{bail, Context};
 use clap::Parser;
 use env_logger::{Builder, Target};
 use hdf5::filters::blosc_set_nthreads;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{self, LevelFilter};
 use ndarray::{arr0, s, Array1};
 use serde_json::Value;
@@ -45,7 +46,9 @@ fn main() -> anyhow::Result<()> {
     log::info!("Initialized with {} files", cli.input.len());
 
     // Read all json files to count the circuits.
-    let n_tot_circs = count_circuits(&cli.input)?;
+    let circ_counts = count_circuits(&cli.input)?;
+    let n_tot_circs = circ_counts.iter().sum();
+
     log::info!("Found {n_tot_circs} circuits in {} files", cli.input.len());
 
     // Make an dataset with the known size.
@@ -59,7 +62,6 @@ fn main() -> anyhow::Result<()> {
         .create("circuits")?;
 
     // Load and write circuits into the dataset
-    let wr_start = Instant::now();
     let mut wr_cursor = 0;
 
     // Compute circuit indexes as we write.
@@ -67,21 +69,42 @@ fn main() -> anyhow::Result<()> {
     let mut index_uuid = HashMap::<String, Vec<u32>>::new();
     let mut index_label = HashMap::<String, Vec<u32>>::new();
 
+    // Track progress.
+    let mpb = MultiProgress::new();
+    let pb_main = mpb.add(pb_new(n_tot_circs, format!("Processing circuits")));
+    pb_main.tick();
+
     // Process all of the files.
-    for path in cli.input.iter() {
-        log::info!("Processing {:?}", path);
-        let circ_array = load_circuits_from_file(path)?;
+    for (i, path) in cli.input.iter().enumerate() {
+        let name = path_to_name(path);
 
-        let begin = wr_cursor;
-        let end = std::cmp::min(wr_cursor + circ_array.len(), n_tot_circs);
+        // Decode circuits.
+        let pb_decode = mpb.add(pb_new(circ_counts[i], format!("Decoding ({name})")));
+        let circ_array = decode_file(path, &pb_decode)?;
+        pb_decode.finish_and_clear();
 
-        log::info!("Writing {} circuits...", circ_array.len());
-        ds.write_slice(&circ_array, s![begin..end])?;
-        wr_cursor += end - begin;
+        // Write in chunks for better progress info.
+        let pb_write = mpb.add(pb_new(circ_array.len(), format!("Writing ({name})")));
+        let mut tot_written = 0;
+        for begin in (0..circ_array.len()).step_by(1_000) {
+            let end = std::cmp::min(begin + 1_000, circ_array.len());
+            let wr_begin = wr_cursor + begin;
+            let wr_end = wr_cursor + end;
 
-        log::info!("Indexing {} circuits...", circ_array.len());
-        for (i, circ) in circ_array.iter().enumerate() {
-            let ds_index = (begin + i) as u32;
+            ds.write_slice(&circ_array.slice(s![begin..end]), s![wr_begin..wr_end])?;
+            let wrote = wr_end - wr_begin;
+            tot_written += wrote;
+            pb_write.inc(wrote as u64);
+        }
+        if tot_written != circ_array.len() {
+            bail!("Only wrote {tot_written}/{} circuits", circ_array.len());
+        }
+        pb_write.finish_and_clear();
+
+        // Compute indexes.
+        let pb_index = mpb.add(pb_new(circ_array.len(), format!("Indexing ({name})")));
+        for (j, circ) in circ_array.iter().enumerate() {
+            let ds_index = (wr_cursor + j) as u32;
             index_day.entry(circ.day).or_default().push(ds_index);
             index_uuid
                 .entry(circ.uuid.to_string())
@@ -91,23 +114,15 @@ fn main() -> anyhow::Result<()> {
                 .entry(circuit_label(&circ)?)
                 .or_default()
                 .push(ds_index);
+            pb_index.inc(1);
         }
+        pb_index.finish_and_clear();
 
-        log::info!(
-            "{}/{} ({:.02}%) done in {:?}, {}/{} ({:.02}%) remain in est. {:?}",
-            end,
-            n_tot_circs,
-            end as f64 / n_tot_circs as f64 * 100.0,
-            wr_start.elapsed(),
-            n_tot_circs - end,
-            n_tot_circs,
-            (n_tot_circs - end) as f64 / n_tot_circs as f64 * 100.0,
-            wr_start
-                .elapsed()
-                .div_f64(end as f64)
-                .mul_f64((n_tot_circs - end) as f64),
-        );
+        pb_main.inc(circ_array.len() as u64);
+        wr_cursor += circ_array.len();
     }
+
+    pb_main.finish();
 
     const CIRCUITS_NOTE: &str =
         "Circuit data as measured from exit relays in the live Tor network. \
@@ -119,92 +134,34 @@ fn main() -> anyhow::Result<()> {
         .create("note")?;
 
     // Now write the index datasets.
-    write_day_index(&file, index_day)?;
-    write_uuid_index(&file, index_uuid)?;
-    write_label_index(&file, index_label)?;
+    let pb = pb_new(index_day.len(), format!("Writing day index"));
+    write_day_index(&file, index_day, &pb)?;
+    pb.finish();
+
+    let pb = pb_new(index_uuid.len(), format!("Writing uuid index"));
+    write_uuid_index(&file, index_uuid, &pb)?;
+    pb.finish();
+
+    let pb = pb_new(index_label.len(), format!("Writing label index"));
+    write_label_index(&file, index_label, &pb)?;
+    pb.finish();
 
     file.close()?;
     log::info!("All done in {:?}!", main_start.elapsed());
     Ok(())
 }
 
-fn write_day_index(file: &hdf5::File, index: HashMap::<u8, Vec<u32>>) -> anyhow::Result<()> {
-    log::info!("Writing global day index...");
-
-    let group = file.create_group("/index/day")?;
-
-    for (day, indices) in index.into_iter() {
-        group
-            .new_dataset_builder()
-            .with_data(&Array1::from_vec(indices))
-            .create(format!("{day}").as_str())?;
-    }
-
-    const DAY_NOTE: &str =
-        "Provides a cached copy of the indices into the circuits dataset of those \
-        circuits that were observed on a given day.";
-    group
-        .new_attr_builder()
-        .with_data(&arr0(fixedascii_from_str::<128>(DAY_NOTE)?))
-        .create("note")?;
-
-    Ok(())
+fn pb_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "{msg}: {wide_bar:.green} {pos}/{len} ({percent}%) [{elapsed_precise} (eta {eta_precise})]",
+    )
+    .unwrap_or(ProgressStyle::default_bar())
 }
 
-fn write_uuid_index(file: &hdf5::File, index: HashMap::<String, Vec<u32>>) -> anyhow::Result<()> {
-    log::info!("Writing global uuid index...");
-
-    let group = file.create_group("/index/uuid")?;
-
-    for (uuid, indices) in index.into_iter() {
-        if indices.len() != 1 {
-            bail!(
-                "Uuid should be unique but we found {} indices",
-                indices.len()
-            );
-        }
-        group
-            .new_dataset_builder()
-            .with_data(&arr0(indices[0]))
-            .create(uuid.as_str())?;
-    }
-
-    const UUID_NOTE: &str =
-        "Provides a cached copy of the indices into the circuits dataset of the \
-        circuit with the given uuid.";
-    group
-        .new_attr_builder()
-        .with_data(&arr0(fixedascii_from_str::<128>(UUID_NOTE)?))
-        .create("note")?;
-
-    Ok(())
-}
-
-
-fn write_label_index(file: &hdf5::File, index: HashMap::<String, Vec<u32>>) -> anyhow::Result<()> {
-    log::info!("Writing global label index...");
-
-    let group = file.create_group("/index/label")?;
-
-    for (label, indices) in index.into_iter() {
-        // We need the `replace("/", "_")` to maintain the path structure in the hdf5.
-        group
-            .new_dataset_builder()
-            .with_data(&Array1::from_vec(indices))
-            .create(label.replace("/", "_").as_str())?;
-    }
-
-    const LABEL_NOTE: &str =
-        "Provides a cached copy of the indices into the circuits dataset of those \
-        circuits that match the given label. The label is the circuit's \
-        shortest_private_suffix, or the domain if the shortest_private_suffix \
-        is null. The label path is modified to replace '/' with '_'.";
-    group
-        .new_attr_builder()
-        .with_data(&arr0(fixedascii_from_str::<512>(LABEL_NOTE)?))
-        .create("note")?;
-
-    Ok(())
+fn pb_new(count: usize, message: String) -> ProgressBar {
+    ProgressBar::new(count as u64)
+        .with_message(message)
+        .with_style(pb_style())
 }
 
 fn circuit_label(circ: &Circuit) -> anyhow::Result<String> {
@@ -215,12 +172,22 @@ fn circuit_label(circ: &Circuit) -> anyhow::Result<String> {
     }
 }
 
-fn count_circuits(paths: &Vec<PathBuf>) -> anyhow::Result<usize> {
-    let mut n_circuits = 0;
+fn count_circuits(paths: &Vec<PathBuf>) -> anyhow::Result<Vec<usize>> {
+    let prog = ProgressBar::new(paths.len() as u64).with_style(pb_style());
+
+    let mut counts = Vec::new();
     for p in paths.iter() {
-        n_circuits += count_lines(p)?;
+        prog.set_message(path_to_name(p));
+        counts.push(count_lines(p)?);
+        prog.inc(1);
     }
-    Ok(n_circuits)
+
+    Ok(counts)
+}
+
+fn path_to_name(path: &PathBuf) -> String {
+    path.file_name()
+        .map_or(String::from("unknown"), |s| s.to_string_lossy().to_string())
 }
 
 fn count_lines(path: &PathBuf) -> anyhow::Result<usize> {
@@ -240,7 +207,28 @@ fn count_lines(path: &PathBuf) -> anyhow::Result<usize> {
     Ok(count)
 }
 
-fn load_circuits_from_file(path: &PathBuf) -> anyhow::Result<Array1<Circuit>> {
+fn open_input_stream(path: &PathBuf) -> anyhow::Result<Box<dyn BufRead>> {
+    // Open the file in read-only mode with buffer.
+    let file = std::fs::File::open(path)?;
+
+    // Check if we have a zstd-compressed file.
+    let use_zstd = if let Some(ext) = path.extension() {
+        ext == "zst"
+    } else {
+        false
+    };
+
+    // Run an inline zstd::Decoder if the file is compressed.
+    let data_stream: Box<dyn BufRead> = if use_zstd {
+        Box::new(BufReader::new(Decoder::new(file)?))
+    } else {
+        Box::new(BufReader::new(file))
+    };
+
+    Ok(data_stream)
+}
+
+fn decode_file(path: &PathBuf, pb: &ProgressBar) -> anyhow::Result<Array1<Circuit>> {
     let mut stream = open_input_stream(path)?;
 
     // Use a single string buffer into which we read each line.
@@ -252,6 +240,7 @@ fn load_circuits_from_file(path: &PathBuf) -> anyhow::Result<Array1<Circuit>> {
         circuits.push(decode_circuit(&buffer)?);
         // Reclaim capacity.
         buffer.clear();
+        pb.inc(1);
     }
 
     Ok(Array1::from_vec(circuits))
@@ -371,23 +360,89 @@ fn decode_cells(json_cells: &Vec<Value>) -> anyhow::Result<[Cell; 5000]> {
     Ok(cells)
 }
 
-fn open_input_stream(path: &PathBuf) -> anyhow::Result<Box<dyn BufRead>> {
-    // Open the file in read-only mode with buffer.
-    let file = std::fs::File::open(path)?;
+fn write_day_index(
+    file: &hdf5::File,
+    index: HashMap<u8, Vec<u32>>,
+    pb: &ProgressBar,
+) -> anyhow::Result<()> {
+    let group = file.create_group("/index/day")?;
 
-    // Check if we have a zstd-compressed file.
-    let use_zstd = if let Some(ext) = path.extension() {
-        ext == "zst"
-    } else {
-        false
-    };
+    for (day, indices) in index.into_iter() {
+        group
+            .new_dataset_builder()
+            .with_data(&Array1::from_vec(indices))
+            .create(format!("{day}").as_str())?;
+        pb.inc(1);
+    }
 
-    // Run an inline zstd::Decoder if the file is compressed.
-    let data_stream: Box<dyn BufRead> = if use_zstd {
-        Box::new(BufReader::new(Decoder::new(file)?))
-    } else {
-        Box::new(BufReader::new(file))
-    };
+    const DAY_NOTE: &str =
+        "Provides a cached copy of the indices into the circuits dataset of those \
+        circuits that were observed on a given day.";
+    group
+        .new_attr_builder()
+        .with_data(&arr0(fixedascii_from_str::<128>(DAY_NOTE)?))
+        .create("note")?;
 
-    Ok(data_stream)
+    Ok(())
+}
+
+fn write_uuid_index(
+    file: &hdf5::File,
+    index: HashMap<String, Vec<u32>>,
+    pb: &ProgressBar,
+) -> anyhow::Result<()> {
+    let group = file.create_group("/index/uuid")?;
+
+    for (uuid, indices) in index.into_iter() {
+        if indices.len() != 1 {
+            bail!(
+                "Uuid should be unique but we found {} indices",
+                indices.len()
+            );
+        }
+        group
+            .new_dataset_builder()
+            .with_data(&arr0(indices[0]))
+            .create(uuid.as_str())?;
+        pb.inc(1);
+    }
+
+    const UUID_NOTE: &str =
+        "Provides a cached copy of the indices into the circuits dataset of the \
+        circuit with the given uuid.";
+    group
+        .new_attr_builder()
+        .with_data(&arr0(fixedascii_from_str::<128>(UUID_NOTE)?))
+        .create("note")?;
+
+    Ok(())
+}
+
+fn write_label_index(
+    file: &hdf5::File,
+    index: HashMap<String, Vec<u32>>,
+    pb: &ProgressBar,
+) -> anyhow::Result<()> {
+    let group = file.create_group("/index/label")?;
+
+    for (label, indices) in index.into_iter() {
+        // We need the `replace("/", "_")` to maintain the path structure in the hdf5.
+        group
+            .new_dataset_builder()
+            .with_data(&Array1::from_vec(indices))
+            .create(label.replace("/", "_").as_str())?;
+        pb.inc(1);
+    }
+
+    const LABEL_NOTE: &str =
+        "Provides a cached copy of the indices into the circuits dataset of those \
+        circuits that match the given label. The label is the circuit's \
+        shortest_private_suffix, or the domain if the shortest_private_suffix \
+        is null. The label path is modified to replace '/' with '_'.";
+    group
+        .new_attr_builder()
+        .with_data(&arr0(fixedascii_from_str::<512>(LABEL_NOTE)?))
+        .create("note")?;
+
+    Ok(())
 }
