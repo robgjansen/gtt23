@@ -29,3 +29,6 @@ name = "dumpcirc"
 
 [[example]]
 name = "makedset"
+
+[[example]]
+name = "convertdset"
