@@ -7,6 +7,7 @@ use anyhow::{bail, Context};
 use clap::Parser;
 use env_logger::{Builder, Target};
 use hdf5::filters::blosc_set_nthreads;
+use hdf5::types::FixedAscii;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{self, LevelFilter};
 use ndarray::{arr0, s, Array1};
@@ -66,13 +67,15 @@ fn main() -> anyhow::Result<()> {
 
     // Compute circuit indexes as we write.
     let mut index_day = HashMap::<u8, Vec<u32>>::new();
-    let mut index_uuid = HashMap::<String, Vec<u32>>::new();
-    let mut index_label = HashMap::<String, Vec<u32>>::new();
+    let mut index_uuid = HashMap::<FixedAscii<32>, Vec<u32>>::new();
+    let mut index_label = HashMap::<FixedAscii<44>, Vec<u32>>::new();
 
     // Track progress.
     let mpb = MultiProgress::new();
     let pb_main = mpb.add(pb_new(n_tot_circs, format!("Processing circuits")));
     pb_main.tick();
+
+    let fixed_ascii_null = fixedascii_null::<44>()?;
 
     // Process all of the files.
     for (i, path) in cli.input.iter().enumerate() {
@@ -105,15 +108,10 @@ fn main() -> anyhow::Result<()> {
         let pb_index = mpb.add(pb_new(circ_array.len(), format!("Indexing ({name})")));
         for (j, circ) in circ_array.iter().enumerate() {
             let ds_index = (wr_cursor + j) as u32;
+            let label = circuit_label(&circ, &fixed_ascii_null)?;
             index_day.entry(circ.day).or_default().push(ds_index);
-            index_uuid
-                .entry(circ.uuid.to_string())
-                .or_default()
-                .push(ds_index);
-            index_label
-                .entry(circuit_label(&circ)?)
-                .or_default()
-                .push(ds_index);
+            index_uuid.entry(circ.uuid).or_default().push(ds_index);
+            index_label.entry(label).or_default().push(ds_index);
             pb_index.inc(1);
         }
         pb_index.finish_and_clear();
@@ -156,11 +154,14 @@ fn pb_new(count: usize, message: String) -> ProgressBar {
         .with_style(pb_style())
 }
 
-fn circuit_label(circ: &Circuit) -> anyhow::Result<String> {
-    if circ.shortest_private_suffix != fixedascii_null::<44>()? {
-        Ok(circ.shortest_private_suffix.to_string())
+fn circuit_label(
+    circ: &Circuit,
+    fixed_ascii_null: &FixedAscii<44>,
+) -> anyhow::Result<FixedAscii<44>> {
+    if circ.shortest_private_suffix != *fixed_ascii_null {
+        Ok(circ.shortest_private_suffix)
     } else {
-        Ok(circ.domain.to_string())
+        Ok(circ.domain)
     }
 }
 
@@ -377,7 +378,10 @@ fn write_day_index(file: &hdf5::File, index: HashMap<u8, Vec<u32>>) -> anyhow::R
     Ok(())
 }
 
-fn write_label_index(file: &hdf5::File, index: HashMap<String, Vec<u32>>) -> anyhow::Result<()> {
+fn write_label_index(
+    file: &hdf5::File,
+    index: HashMap<FixedAscii<44>, Vec<u32>>,
+) -> anyhow::Result<()> {
     let pb = pb_new(index.len(), format!("Writing label index"));
 
     let group = file.create_group("/index/label")?;
@@ -405,7 +409,10 @@ fn write_label_index(file: &hdf5::File, index: HashMap<String, Vec<u32>>) -> any
     Ok(())
 }
 
-fn write_uuid_index(file: &hdf5::File, index: HashMap<String, Vec<u32>>) -> anyhow::Result<()> {
+fn write_uuid_index(
+    file: &hdf5::File,
+    index: HashMap<FixedAscii<32>, Vec<u32>>,
+) -> anyhow::Result<()> {
     let pb = pb_new(index.len(), format!("Writing uuid index"));
 
     let group = file.create_group("/index/uuid")?;
