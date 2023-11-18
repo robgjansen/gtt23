@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -44,7 +45,7 @@ fn main() -> anyhow::Result<()> {
     log::info!("Found {n_tot_circs} circuits");
 
     // Make an dataset with the known size.
-    let file = hdf5::File::create(cli.output)?;
+    let file = hdf5::File::create(&cli.output)?;
     let ds = file
         .new_dataset_builder()
         .chunk(25)
@@ -107,19 +108,18 @@ fn main() -> anyhow::Result<()> {
         .create("note")?;
 
     // Now write the index datasets.
-    let pb = pb_new(index_day.len(), format!("Writing day index"));
-    write_day_index(&file, index_day, &pb)?;
-    pb.finish();
-
-    let pb = pb_new(index_uuid.len(), format!("Writing uuid index"));
-    write_uuid_index(&file, index_uuid, &pb)?;
-    pb.finish();
-
-    let pb = pb_new(index_label.len(), format!("Writing label index"));
-    write_label_index(&file, index_label, &pb)?;
-    pb.finish();
+    write_day_index(&file, index_day)?;
+    write_label_index(&file, index_label)?;
 
     file.close()?;
+    infile.close()?;
+
+    // the UUID index takes a bit longer to write.
+    fs::copy(&cli.output, "with_uuid_idx.hdf5")?;
+    let file = hdf5::File::open_rw("with_uuid_idx.hdf5")?;
+    write_uuid_index(&file, index_uuid)?;
+    file.close()?;
+
     log::info!("All done in {:?}!", main_start.elapsed());
     Ok(())
 }
@@ -145,11 +145,9 @@ fn circuit_label(circ: &Circuit) -> anyhow::Result<String> {
     }
 }
 
-fn write_day_index(
-    file: &hdf5::File,
-    index: HashMap<u8, Vec<u32>>,
-    pb: &ProgressBar,
-) -> anyhow::Result<()> {
+fn write_day_index(file: &hdf5::File, index: HashMap<u8, Vec<u32>>) -> anyhow::Result<()> {
+    let pb = pb_new(index.len(), format!("Writing day index"));
+
     let group = file.create_group("/index/day")?;
 
     for (day, indices) in index.into_iter() {
@@ -168,14 +166,41 @@ fn write_day_index(
         .with_data(&arr0(fixedascii_from_str::<128>(DAY_NOTE)?))
         .create("note")?;
 
+    pb.finish();
     Ok(())
 }
 
-fn write_uuid_index(
-    file: &hdf5::File,
-    index: HashMap<String, Vec<u32>>,
-    pb: &ProgressBar,
-) -> anyhow::Result<()> {
+fn write_label_index(file: &hdf5::File, index: HashMap<String, Vec<u32>>) -> anyhow::Result<()> {
+    let pb = pb_new(index.len(), format!("Writing label index"));
+
+    let group = file.create_group("/index/label")?;
+
+    for (label, indices) in index.into_iter() {
+        // We need the `replace("/", "_")` to maintain the path structure in the hdf5.
+        group
+            .new_dataset_builder()
+            .with_data(&Array1::from_vec(indices))
+            .create(label.replace("/", "_").as_str())?;
+        pb.inc(1);
+    }
+
+    const LABEL_NOTE: &str =
+        "Provides a cached copy of the indices into the circuits dataset of those \
+        circuits that match the given label. The label is the circuit's \
+        shortest_private_suffix, or the domain if the shortest_private_suffix \
+        is null. The label path is modified to replace '/' with '_'.";
+    group
+        .new_attr_builder()
+        .with_data(&arr0(fixedascii_from_str::<512>(LABEL_NOTE)?))
+        .create("note")?;
+
+    pb.finish();
+    Ok(())
+}
+
+fn write_uuid_index(file: &hdf5::File, index: HashMap<String, Vec<u32>>) -> anyhow::Result<()> {
+    let pb = pb_new(index.len(), format!("Writing uuid index"));
+
     let group = file.create_group("/index/uuid")?;
 
     for (uuid, indices) in index.into_iter() {
@@ -200,34 +225,6 @@ fn write_uuid_index(
         .with_data(&arr0(fixedascii_from_str::<128>(UUID_NOTE)?))
         .create("note")?;
 
-    Ok(())
-}
-
-fn write_label_index(
-    file: &hdf5::File,
-    index: HashMap<String, Vec<u32>>,
-    pb: &ProgressBar,
-) -> anyhow::Result<()> {
-    let group = file.create_group("/index/label")?;
-
-    for (label, indices) in index.into_iter() {
-        // We need the `replace("/", "_")` to maintain the path structure in the hdf5.
-        group
-            .new_dataset_builder()
-            .with_data(&Array1::from_vec(indices))
-            .create(label.replace("/", "_").as_str())?;
-        pb.inc(1);
-    }
-
-    const LABEL_NOTE: &str =
-        "Provides a cached copy of the indices into the circuits dataset of those \
-        circuits that match the given label. The label is the circuit's \
-        shortest_private_suffix, or the domain if the shortest_private_suffix \
-        is null. The label path is modified to replace '/' with '_'.";
-    group
-        .new_attr_builder()
-        .with_data(&arr0(fixedascii_from_str::<512>(LABEL_NOTE)?))
-        .create("note")?;
-
+    pb.finish();
     Ok(())
 }
