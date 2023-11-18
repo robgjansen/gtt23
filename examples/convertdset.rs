@@ -63,6 +63,9 @@ fn main() -> anyhow::Result<()> {
     let pb_main = pb_new(n_tot_circs, format!("Processing circuits"));
     pb_main.tick();
 
+    let fixed_ascii_none = fixedascii_from_str::<44>("None")?;
+    let fixed_ascii_null = fixedascii_null::<44>()?;
+
     // Write in chunks for better progress info.
     let mut tot_written = 0;
     for wr_begin in (0..n_tot_circs).step_by(1_000) {
@@ -73,8 +76,8 @@ fn main() -> anyhow::Result<()> {
         for (i, circ) in circ_array.iter_mut().enumerate() {
             let ds_index = (wr_begin + i) as u32;
 
-            if circ.shortest_private_suffix == fixedascii_from_str::<44>("None")? {
-                circ.shortest_private_suffix = fixedascii_null::<44>()?;
+            if circ.shortest_private_suffix == fixed_ascii_none {
+                circ.shortest_private_suffix = fixed_ascii_null;
             }
 
             index_day.entry(circ.day).or_default().push(ds_index);
