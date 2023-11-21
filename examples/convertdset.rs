@@ -56,8 +56,8 @@ fn main() -> anyhow::Result<()> {
 
     // Compute circuit indexes as we write.
     let mut index_day = HashMap::<u8, Vec<u32>>::new();
-    let mut index_uuid = HashMap::<FixedAscii<32>, Vec<u32>>::new();
-    let mut index_label = HashMap::<FixedAscii<44>, Vec<u32>>::new();
+    let mut index_uuid = HashMap::<String, Vec<u32>>::new();
+    let mut index_label = HashMap::<String, Vec<u32>>::new();
 
     // Track progress.
     let pb_main = pb_new(n_tot_circs, format!("Processing circuits"));
@@ -82,8 +82,14 @@ fn main() -> anyhow::Result<()> {
             let label = circuit_label(&circ, &fixed_ascii_null)?;
 
             index_day.entry(circ.day).or_default().push(ds_index);
-            index_uuid.entry(circ.uuid).or_default().push(ds_index);
-            index_label.entry(label).or_default().push(ds_index);
+            index_uuid
+                .entry(circ.uuid.to_string())
+                .or_default()
+                .push(ds_index);
+            index_label
+                .entry(label.to_string())
+                .or_default()
+                .push(ds_index);
         }
 
         ds.write_slice(&circ_array, s![wr_begin..wr_end])?;
@@ -105,21 +111,13 @@ fn main() -> anyhow::Result<()> {
         .with_data(&arr0(fixedascii_from_str::<512>(CIRCUITS_NOTE)?))
         .create("note")?;
 
-    // Now write the index datasets.
-    write_day_index(&file, index_day)?;
-    
     file.close()?;
     infile.close()?;
 
-    fs::copy(&cli.output, "with_label_idx.hdf5")?;
-    let file = hdf5::File::open_rw("with_label_idx.hdf5")?;
-    write_label_index(&file, index_label)?;
-    file.close()?;
-
-    fs::copy("with_label_idx.hdf5", "with_uuid_idx.hdf5")?;
-    let file = hdf5::File::open_rw("with_uuid_idx.hdf5")?;
-    write_uuid_index(&file, index_uuid)?;
-    file.close()?;
+    // Store the index datasets for now so we can write later.
+    serde_json::to_writer(fs::File::create("index_day.json")?, &index_day)?;
+    serde_json::to_writer(fs::File::create("index_label.json")?, &index_label)?;
+    serde_json::to_writer(fs::File::create("index_uuid.json")?, &index_uuid)?;
 
     log::info!("All done in {:?}!", main_start.elapsed());
     Ok(())
@@ -147,94 +145,4 @@ fn circuit_label(
     } else {
         Ok(circ.domain)
     }
-}
-
-fn write_day_index(file: &hdf5::File, index: HashMap<u8, Vec<u32>>) -> anyhow::Result<()> {
-    let pb = pb_new(index.len(), format!("Writing day index"));
-
-    let group = file.create_group("/index/day")?;
-
-    for (day, indices) in index.into_iter() {
-        group
-            .new_dataset_builder()
-            .with_data(&Array1::from_vec(indices))
-            .create(format!("{day}").as_str())?;
-        pb.inc(1);
-    }
-
-    const DAY_NOTE: &str =
-        "Provides a cached copy of the indices into the circuits dataset of those \
-        circuits that were observed on a given day.";
-    group
-        .new_attr_builder()
-        .with_data(&arr0(fixedascii_from_str::<128>(DAY_NOTE)?))
-        .create("note")?;
-
-    pb.finish();
-    Ok(())
-}
-
-fn write_label_index(
-    file: &hdf5::File,
-    index: HashMap<FixedAscii<44>, Vec<u32>>,
-) -> anyhow::Result<()> {
-    let pb = pb_new(index.len(), format!("Writing label index"));
-
-    let group = file.create_group("/index/label")?;
-
-    for (label, indices) in index.into_iter() {
-        // We need the `replace("/", "_")` to maintain the path structure in the hdf5.
-        group
-            .new_dataset_builder()
-            .with_data(&Array1::from_vec(indices))
-            .create(label.replace("/", "_").as_str())?;
-        pb.inc(1);
-    }
-
-    const LABEL_NOTE: &str =
-        "Provides a cached copy of the indices into the circuits dataset of those \
-        circuits that match the given label. The label is the circuit's \
-        shortest_private_suffix, or the domain if the shortest_private_suffix \
-        is null. The label path is modified to replace '/' with '_'.";
-    group
-        .new_attr_builder()
-        .with_data(&arr0(fixedascii_from_str::<512>(LABEL_NOTE)?))
-        .create("note")?;
-
-    pb.finish();
-    Ok(())
-}
-
-fn write_uuid_index(
-    file: &hdf5::File,
-    index: HashMap<FixedAscii<32>, Vec<u32>>,
-) -> anyhow::Result<()> {
-    let pb = pb_new(index.len(), format!("Writing uuid index"));
-
-    let group = file.create_group("/index/uuid")?;
-
-    for (uuid, indices) in index.into_iter() {
-        if indices.len() != 1 {
-            bail!(
-                "Uuid should be unique but we found {} indices",
-                indices.len()
-            );
-        }
-        group
-            .new_dataset_builder()
-            .with_data(&arr0(indices[0]))
-            .create(uuid.as_str())?;
-        pb.inc(1);
-    }
-
-    const UUID_NOTE: &str =
-        "Provides a cached copy of the indices into the circuits dataset of the \
-        circuit with the given uuid.";
-    group
-        .new_attr_builder()
-        .with_data(&arr0(fixedascii_from_str::<128>(UUID_NOTE)?))
-        .create("note")?;
-
-    pb.finish();
-    Ok(())
 }

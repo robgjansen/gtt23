@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -67,8 +68,8 @@ fn main() -> anyhow::Result<()> {
 
     // Compute circuit indexes as we write.
     let mut index_day = HashMap::<u8, Vec<u32>>::new();
-    let mut index_uuid = HashMap::<FixedAscii<32>, Vec<u32>>::new();
-    let mut index_label = HashMap::<FixedAscii<44>, Vec<u32>>::new();
+    let mut index_uuid = HashMap::<String, Vec<u32>>::new();
+    let mut index_label = HashMap::<String, Vec<u32>>::new();
 
     // Track progress.
     let mpb = MultiProgress::new();
@@ -110,8 +111,8 @@ fn main() -> anyhow::Result<()> {
             let ds_index = (wr_cursor + j) as u32;
             let label = circuit_label(&circ, &fixed_ascii_null)?;
             index_day.entry(circ.day).or_default().push(ds_index);
-            index_uuid.entry(circ.uuid).or_default().push(ds_index);
-            index_label.entry(label).or_default().push(ds_index);
+            index_uuid.entry(circ.uuid.to_string()).or_default().push(ds_index);
+            index_label.entry(label.to_string()).or_default().push(ds_index);
             pb_index.inc(1);
         }
         pb_index.finish_and_clear();
@@ -131,12 +132,13 @@ fn main() -> anyhow::Result<()> {
         .with_data(&arr0(fixedascii_from_str::<512>(CIRCUITS_NOTE)?))
         .create("note")?;
 
-    // Now write the index datasets.
-    write_day_index(&file, index_day)?;
-    write_label_index(&file, index_label)?;
-    write_uuid_index(&file, index_uuid)?;
-
     file.close()?;
+
+    // Store the index datasets for now so we can write later.
+    serde_json::to_writer(fs::File::create("index_day.json")?, &index_day)?;
+    serde_json::to_writer(fs::File::create("index_label.json")?, &index_label)?;
+    serde_json::to_writer(fs::File::create("index_uuid.json")?, &index_uuid)?;
+
     log::info!("All done in {:?}!", main_start.elapsed());
     Ok(())
 }
