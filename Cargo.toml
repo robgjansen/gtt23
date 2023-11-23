@@ -13,6 +13,7 @@ anyhow = "1.0.75"
 clap = { version = "4.4.7", features = ["derive"] }
 env_logger = "0.10.0"
 hdf5 = { version = "0.8.1", features = ["blosc"] }
+humantime = "2.1.0"
 indicatif = "0.17.7"
 log = "0.4.20"
 ndarray = "0.15.6"
@@ -28,7 +29,10 @@ path = "src/lib.rs"
 name = "dumpcirc"
 
 [[example]]
-name = "makedset"
+name = "writecircuits"
 
 [[example]]
-name = "convertdset"
+name = "writeindex"
+
+[[example]]
+name = "writenotes"

@@ -230,6 +230,7 @@ dependencies = [
  "clap",
  "env_logger",
  "hdf5",
+ "humantime",
  "indicatif",
  "log",
  "ndarray",
