@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use anyhow::bail;
 use clap::Parser;
 use env_logger::{Builder, Target};
 use hdf5::{
@@ -12,10 +11,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use log::{self, LevelFilter};
 use ndarray::{self, Array1, ArrayView};
 
-use gtt23::{
-    Circuit, CircuitIndex, DayIndexEntry, LabelIndexEntry, LengthIndexEntry, PortIndexEntry,
-    UuidIndexEntry,
-};
+use gtt23::{Circuit, CircuitIndex, IndexArrayEntry, IndexEntry};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -73,91 +69,27 @@ fn main() -> anyhow::Result<()> {
         file.close()?;
     }
 
-    // TODO: use generics to write a helper method for the following.
+    // Write each index into the hdf5 database.
 
-    // Write the uuid index.
-    {
-        let pb = pb_new(ci_uuid.len(), format!("Preparing uuid index"));
-        let mut index = Vec::new();
-        for (uuid, indices) in ci_uuid.into_iter() {
-            if indices.len() != 1 {
-                bail!("Too many indieces: {}", indices.len());
-            }
-            index.push(UuidIndexEntry {
-                uuid,
-                index: *indices.first().unwrap(),
-            });
-            pb.inc(1);
-        }
-        index.sort_by_key(|v| v.uuid.to_string());
-        pb.finish();
+    let mut index = create_index_entries(ci_uuid, "uuid")?;
+    index.sort_by_key(|v| v.value.to_string());
+    write_index(&cli.input, "/index/uuid", &Array1::from_vec(index))?;
 
-        write_index(&cli.input, "/index/uuid", &Array1::from_vec(index))?;
-    }
+    let mut index = create_index_arr_entries(ci_label, "label")?;
+    index.sort_by_key(|v| v.value.to_string());
+    write_index(&cli.input, "/index/label", &Array1::from_vec(index))?;
 
-    // Write the label index.
-    {
-        let pb = pb_new(ci_label.len(), format!("Preparing label index"));
-        let mut index = Vec::new();
-        for (label, mut indices) in ci_label.into_iter() {
-            indices.sort();
-            let indexa = VarLenArray::from_slice(&indices);
-            index.push(LabelIndexEntry { label, indexa });
-            pb.inc(1);
-        }
-        index.sort_by_key(|v| v.label.to_string());
-        pb.finish();
+    let mut index = create_index_arr_entries(ci_day, "day")?;
+    index.sort_by_key(|v| v.value);
+    write_index(&cli.input, "/index/day", &Array1::from_vec(index))?;
 
-        write_index(&cli.input, "/index/label", &Array1::from_vec(index))?;
-    }
+    let mut index = create_index_arr_entries(ci_port, "port")?;
+    index.sort_by_key(|v| v.value);
+    write_index(&cli.input, "/index/port", &Array1::from_vec(index))?;
 
-    // Write the day index.
-    {
-        let pb = pb_new(ci_day.len(), format!("Preparing day index"));
-        let mut index = Vec::new();
-        for (day, mut indices) in ci_day.into_iter() {
-            indices.sort();
-            let indexa = VarLenArray::from_slice(&indices);
-            index.push(DayIndexEntry { day, indexa });
-            pb.inc(1);
-        }
-        index.sort_by_key(|v| v.day);
-        pb.finish();
-
-        write_index(&cli.input, "/index/day", &Array1::from_vec(index))?;
-    }
-
-    // Write the port index.
-    {
-        let pb = pb_new(ci_port.len(), format!("Preparing port index"));
-        let mut index = Vec::new();
-        for (port, mut indices) in ci_port.into_iter() {
-            indices.sort();
-            let indexa = VarLenArray::from_slice(&indices);
-            index.push(PortIndexEntry { port, indexa });
-            pb.inc(1);
-        }
-        index.sort_by_key(|v| v.port);
-        pb.finish();
-
-        write_index(&cli.input, "/index/port", &Array1::from_vec(index))?;
-    }
-
-    // Write the length index.
-    {
-        let pb = pb_new(ci_len.len(), format!("Preparing length index"));
-        let mut index = Vec::new();
-        for (len, mut indices) in ci_len.into_iter() {
-            indices.sort();
-            let indexa = VarLenArray::from_slice(&indices);
-            index.push(LengthIndexEntry { len, indexa });
-            pb.inc(1);
-        }
-        index.sort_by_key(|v| v.len);
-        pb.finish();
-
-        write_index(&cli.input, "/index/len", &Array1::from_vec(index))?;
-    }
+    let mut index = create_index_arr_entries(ci_len, "len")?;
+    index.sort_by_key(|v| v.value);
+    write_index(&cli.input, "/index/len", &Array1::from_vec(index))?;
 
     Ok(())
 }
@@ -173,6 +105,43 @@ fn pb_new(count: usize, message: String) -> ProgressBar {
     ProgressBar::new(count as u64)
         .with_message(message)
         .with_style(pb_style())
+}
+
+pub fn create_index_entries<T>(
+    index_map: HashMap<T, Vec<CircuitIndex>>,
+    name: &str,
+) -> anyhow::Result<Vec<IndexEntry<T>>>
+where
+    T: H5Type,
+{
+    Ok(create_index_arr_entries(index_map, name)?
+        .into_iter()
+        .map(|ent| IndexEntry {
+            value: ent.value,
+            index: *ent.indexarr.first().unwrap(),
+        })
+        .collect())
+}
+
+pub fn create_index_arr_entries<T>(
+    index_map: HashMap<T, Vec<CircuitIndex>>,
+    name: &str,
+) -> anyhow::Result<Vec<IndexArrayEntry<T>>>
+where
+    T: H5Type,
+{
+    let mut index = Vec::new();
+    let pb = pb_new(index_map.len(), format!("Preparing {name} index"));
+
+    for (value, mut indices) in index_map.into_iter() {
+        indices.sort();
+        let indexarr = VarLenArray::from_slice(&indices);
+        index.push(IndexArrayEntry { value, indexarr });
+        pb.inc(1);
+    }
+
+    pb.finish();
+    Ok(index)
 }
 
 pub fn write_index<'d, A, T, D>(path: &PathBuf, name: &str, data: A) -> anyhow::Result<()>

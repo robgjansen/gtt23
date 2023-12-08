@@ -21,17 +21,22 @@ const CIRCUITS_NOTE: &str = "Circuit data as measured from exit relays in \
     by Rob Jansen, Ryan Wails, and Aaron Johnson. Please cite if you use \
     this dataset.";
 
+const UUID_NOTE: &str = "Provides a cached copy of the indices into the \
+    circuits dataset of the circuit with the given uuid.";
+
+const LABEL_NOTE: &str = "Provides a cached copy of the indices into the \
+    circuits dataset of those circuits that match the given label. The label \
+    is the circuit's shortest_private_suffix, or the domain if the \
+    shortest_private_suffix is null.";
+
 const DAY_NOTE: &str = "Provides a cached copy of the indices into the \
     circuits dataset of those circuits that were observed on a given day.";
 
-const LABEL_NOTE: &str =
-    "Provides a cached copy of the indices into the circuits dataset of those \
-    circuits that match the given label. The label is the circuit's \
-    shortest_private_suffix, or the domain if the shortest_private_suffix \
-    is null. The label path is modified to replace '/' with '_'.";
+const PORT_NOTE: &str = "Provides a cached copy of the indices into the \
+    circuits dataset of those circuits with the given port.";
 
-const UUID_NOTE: &str = "Provides a cached copy of the indices into the \
-    circuits dataset of the circuit with the given uuid.";
+const LEN_NOTE: &str = "Provides a cached copy of the indices into the \
+    circuits dataset of those circuits with the given length.";
 
 fn main() -> anyhow::Result<()> {
     Builder::new()
@@ -44,9 +49,11 @@ fn main() -> anyhow::Result<()> {
     let file = File::open_rw(&cli.input)?;
 
     write_dataset_note(&file, "/circuits", CIRCUITS_NOTE)?;
-    write_dataset_note(&file, "/index/day", DAY_NOTE)?;
-    write_dataset_note(&file, "/index/label", LABEL_NOTE)?;
     write_dataset_note(&file, "/index/uuid", UUID_NOTE)?;
+    write_dataset_note(&file, "/index/label", LABEL_NOTE)?;
+    write_dataset_note(&file, "/index/day", DAY_NOTE)?;
+    write_dataset_note(&file, "/index/port", PORT_NOTE)?;
+    write_dataset_note(&file, "/index/len", LEN_NOTE)?;
 
     file.close()?;
     Ok(())

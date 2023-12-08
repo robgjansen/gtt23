@@ -211,43 +211,33 @@ impl Circuit {
     }
 }
 
-/// An integer index into an array of Circuits.
-/// Requires that the length of the Circuit array is less than 2**32.
+/// An integer index into an array of Circuits. Requires that the length of the
+/// Circuit array is less than 2**32.
 pub type CircuitIndex = u32;
 
 #[derive(H5Type, Clone, Copy, PartialEq, Debug)]
 #[repr(C)]
-pub struct UuidIndexEntry {
-    pub uuid: FixedAscii<32>,
+pub struct IndexEntry<T: H5Type> {
+    /// The value being indexed. For example, in the uuid index, this would be
+    /// the `FixedAscii<32>` uuid string.
+    pub value: T,
+    /// The index of the circuit in the circuits dataset to which this entry's
+    /// value uniquely corresponds. For example, in the uuid index, the circuit
+    /// with the uuid will appear in the circuits dataset at this index (i.e.,
+    /// array offset).
     pub index: CircuitIndex,
 }
 
 #[derive(H5Type, Clone, PartialEq, Debug)]
 #[repr(C)]
-pub struct LabelIndexEntry {
-    pub label: FixedAscii<44>,
-    pub indexa: VarLenArray<CircuitIndex>,
-}
-
-#[derive(H5Type, Clone, PartialEq, Debug)]
-#[repr(C)]
-pub struct DayIndexEntry {
-    pub day: u8,
-    pub indexa: VarLenArray<CircuitIndex>,
-}
-
-#[derive(H5Type, Clone, PartialEq, Debug)]
-#[repr(C)]
-pub struct PortIndexEntry {
-    pub port: u16,
-    pub indexa: VarLenArray<CircuitIndex>,
-}
-
-#[derive(H5Type, Clone, PartialEq, Debug)]
-#[repr(C)]
-pub struct LengthIndexEntry {
-    pub len: u16,
-    pub indexa: VarLenArray<CircuitIndex>,
+pub struct IndexArrayEntry<T: H5Type> {
+    /// The value being indexed. For example, in the day index this would be the
+    /// `u8` day integer.
+    pub value: T,
+    /// An array containing the indices of the circuits in the circuits dataset
+    /// that have this entry's value. For example, in the day index, the indices
+    /// of all circuits with the day value will be stored in this array.
+    pub indexarr: VarLenArray<CircuitIndex>,
 }
 
 /// Converts `s` to a FixedAscii type, truncating `s` or right-padding with
