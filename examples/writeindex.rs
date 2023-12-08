@@ -12,11 +12,14 @@ use indicatif::{ProgressBar, ProgressStyle};
 use log::{self, LevelFilter};
 use ndarray::{self, Array1, ArrayView};
 
-use gtt23::{Circuit, DayIndexEntry, LabelIndexEntry, UuidIndexEntry};
+use gtt23::{
+    Circuit, CircuitIndex, DayIndexEntry, LabelIndexEntry, LengthIndexEntry, PortIndexEntry,
+    UuidIndexEntry,
+};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
-/// Create an HDF5 dataset from GTT23 circuits encoded in jsonl files
+/// Writes an index into an HDF5 dataset of GTT23 circuits
 pub struct Cli {
     /// Input paths to an hdf5 file containing a circuits dataset
     #[arg(value_name = "PATH", required = true)]
@@ -31,11 +34,13 @@ fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
 
-    let mut index_day = HashMap::<u8, Vec<u32>>::new();
-    let mut index_uuid = HashMap::<FixedAscii<32>, Vec<u32>>::new();
-    let mut index_label = HashMap::<FixedAscii<44>, Vec<u32>>::new();
+    let mut ci_uuid = HashMap::<FixedAscii<32>, Vec<CircuitIndex>>::new();
+    let mut ci_label = HashMap::<FixedAscii<44>, Vec<CircuitIndex>>::new();
+    let mut ci_day = HashMap::<u8, Vec<CircuitIndex>>::new();
+    let mut ci_port = HashMap::<u16, Vec<CircuitIndex>>::new();
+    let mut ci_len = HashMap::<u16, Vec<CircuitIndex>>::new();
 
-    // Read the dataset to compute the index.
+    // Read the entire dataset to compute the index.
     {
         let file = File::open(&cli.input)?;
         let dataset = file.dataset("/circuits")?;
@@ -52,11 +57,13 @@ fn main() -> anyhow::Result<()> {
             let circuits: Array1<Circuit> = dataset.read_slice(ndarray::s![begin..end])?;
 
             for (i, circuit) in circuits.iter().enumerate() {
-                let index = (begin + i) as u32;
+                let index = (begin + i) as CircuitIndex;
 
-                index_day.entry(circuit.day).or_default().push(index);
-                index_uuid.entry(circuit.uuid).or_default().push(index);
-                index_label.entry(circuit.label()).or_default().push(index);
+                ci_uuid.entry(circuit.uuid).or_default().push(index);
+                ci_label.entry(circuit.label()).or_default().push(index);
+                ci_day.entry(circuit.day).or_default().push(index);
+                ci_port.entry(circuit.port).or_default().push(index);
+                ci_len.entry(circuit.len).or_default().push(index);
             }
 
             pb.inc((end - begin) as u64);
@@ -66,43 +73,13 @@ fn main() -> anyhow::Result<()> {
         file.close()?;
     }
 
-    // Write the day index.
-    {
-        let pb = pb_new(index_day.len(), format!("Preparing day index"));
-        let mut index = Vec::new();
-        for (day, mut indices) in index_day.into_iter() {
-            indices.sort();
-            let indexa = VarLenArray::from_slice(&indices);
-            index.push(DayIndexEntry { day, indexa });
-            pb.inc(1);
-        }
-        index.sort_by_key(|v| v.day);
-        pb.finish();
-
-        write_index(&cli.input, "/index/day", &Array1::from_vec(index))?;
-    }
-
-    // Write the label index.
-    {
-        let pb = pb_new(index_label.len(), format!("Preparing label index"));
-        let mut index = Vec::new();
-        for (label, mut indices) in index_label.into_iter() {
-            indices.sort();
-            let indexa = VarLenArray::from_slice(&indices);
-            index.push(LabelIndexEntry { label, indexa });
-            pb.inc(1);
-        }
-        index.sort_by_key(|v| v.label.to_string());
-        pb.finish();
-
-        write_index(&cli.input, "/index/label", &Array1::from_vec(index))?;
-    }
+    // TODO: use generics to write a helper method for the following.
 
     // Write the uuid index.
     {
-        let pb = pb_new(index_uuid.len(), format!("Preparing uuid index"));
+        let pb = pb_new(ci_uuid.len(), format!("Preparing uuid index"));
         let mut index = Vec::new();
-        for (uuid, indices) in index_uuid.into_iter() {
+        for (uuid, indices) in ci_uuid.into_iter() {
             if indices.len() != 1 {
                 bail!("Too many indieces: {}", indices.len());
             }
@@ -116,6 +93,70 @@ fn main() -> anyhow::Result<()> {
         pb.finish();
 
         write_index(&cli.input, "/index/uuid", &Array1::from_vec(index))?;
+    }
+
+    // Write the label index.
+    {
+        let pb = pb_new(ci_label.len(), format!("Preparing label index"));
+        let mut index = Vec::new();
+        for (label, mut indices) in ci_label.into_iter() {
+            indices.sort();
+            let indexa = VarLenArray::from_slice(&indices);
+            index.push(LabelIndexEntry { label, indexa });
+            pb.inc(1);
+        }
+        index.sort_by_key(|v| v.label.to_string());
+        pb.finish();
+
+        write_index(&cli.input, "/index/label", &Array1::from_vec(index))?;
+    }
+
+    // Write the day index.
+    {
+        let pb = pb_new(ci_day.len(), format!("Preparing day index"));
+        let mut index = Vec::new();
+        for (day, mut indices) in ci_day.into_iter() {
+            indices.sort();
+            let indexa = VarLenArray::from_slice(&indices);
+            index.push(DayIndexEntry { day, indexa });
+            pb.inc(1);
+        }
+        index.sort_by_key(|v| v.day);
+        pb.finish();
+
+        write_index(&cli.input, "/index/day", &Array1::from_vec(index))?;
+    }
+
+    // Write the port index.
+    {
+        let pb = pb_new(ci_port.len(), format!("Preparing port index"));
+        let mut index = Vec::new();
+        for (port, mut indices) in ci_port.into_iter() {
+            indices.sort();
+            let indexa = VarLenArray::from_slice(&indices);
+            index.push(PortIndexEntry { port, indexa });
+            pb.inc(1);
+        }
+        index.sort_by_key(|v| v.port);
+        pb.finish();
+
+        write_index(&cli.input, "/index/port", &Array1::from_vec(index))?;
+    }
+
+    // Write the length index.
+    {
+        let pb = pb_new(ci_len.len(), format!("Preparing length index"));
+        let mut index = Vec::new();
+        for (len, mut indices) in ci_len.into_iter() {
+            indices.sort();
+            let indexa = VarLenArray::from_slice(&indices);
+            index.push(LengthIndexEntry { len, indexa });
+            pb.inc(1);
+        }
+        index.sort_by_key(|v| v.len);
+        pb.finish();
+
+        write_index(&cli.input, "/index/len", &Array1::from_vec(index))?;
     }
 
     Ok(())

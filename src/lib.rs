@@ -211,25 +211,43 @@ impl Circuit {
     }
 }
 
+/// An integer index into an array of Circuits.
+/// Requires that the length of the Circuit array is less than 2**32.
+pub type CircuitIndex = u32;
+
 #[derive(H5Type, Clone, Copy, PartialEq, Debug)]
 #[repr(C)]
 pub struct UuidIndexEntry {
     pub uuid: FixedAscii<32>,
-    pub index: u32,
+    pub index: CircuitIndex,
 }
 
 #[derive(H5Type, Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct LabelIndexEntry {
     pub label: FixedAscii<44>,
-    pub indexa: VarLenArray<u32>,
+    pub indexa: VarLenArray<CircuitIndex>,
 }
 
 #[derive(H5Type, Clone, PartialEq, Debug)]
 #[repr(C)]
 pub struct DayIndexEntry {
     pub day: u8,
-    pub indexa: VarLenArray<u32>,
+    pub indexa: VarLenArray<CircuitIndex>,
+}
+
+#[derive(H5Type, Clone, PartialEq, Debug)]
+#[repr(C)]
+pub struct PortIndexEntry {
+    pub port: u16,
+    pub indexa: VarLenArray<CircuitIndex>,
+}
+
+#[derive(H5Type, Clone, PartialEq, Debug)]
+#[repr(C)]
+pub struct LengthIndexEntry {
+    pub len: u16,
+    pub indexa: VarLenArray<CircuitIndex>,
 }
 
 /// Converts `s` to a FixedAscii type, truncating `s` or right-padding with
