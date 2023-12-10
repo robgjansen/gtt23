@@ -29,6 +29,9 @@ path = "src/lib.rs"
 name = "dumpcirc"
 
 [[example]]
+name = "copycircuits"
+
+[[example]]
 name = "writecircuits"
 
 [[example]]
