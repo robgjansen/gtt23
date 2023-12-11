@@ -211,6 +211,28 @@ impl Circuit {
     }
 }
 
+#[derive(H5Type, Clone, Copy, PartialEq, Debug)]
+#[repr(C)]
+pub struct ShadowCircuit {
+    pub uuid: FixedAscii<32>,
+    pub uuid_gtt23: FixedAscii<32>,
+    pub load: f32,
+    pub len: u16,
+    pub cells: [Cell; 5000],
+}
+
+impl ShadowCircuit {
+    pub fn empty() -> Self {
+        Self {
+            uuid: fixedascii_null::<32>().unwrap(),
+            uuid_gtt23: fixedascii_null::<32>().unwrap(),
+            load: 0.0,
+            len: 0,
+            cells: [Cell::empty(); 5000],
+        }
+    }
+}
+
 /// An integer index into an array of Circuits. Requires that the length of the
 /// Circuit array is less than 2**32.
 pub type CircuitIndex = u32;
