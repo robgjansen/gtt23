@@ -15,9 +15,13 @@ pub struct Cli {
     pub input: PathBuf,
 }
 
+const FILE_NOTE: &str = "GTT23: A 2023 Dataset of Genuine Tor Traces. \
+    Rob Jansen, Ryan Wails, and Aaron Johnson. For more information about \
+    this dataset, see https://doi.org/10.5281/zenodo.10620520.";
+
 const CIRCUITS_NOTE: &str = "Circuit data as measured from exit relays in \
-    the live Tor network. Further description of the dataset can be found \
-    in the research paper 'Website Fingerprinting with Genuine Tor Traces' \
+    the live Tor network. Further measurement details can be found in the \
+    research paper entitled 'Website Fingerprinting with Genuine Tor Traces' \
     by Rob Jansen, Ryan Wails, and Aaron Johnson. Please cite if you use \
     this dataset.";
 
@@ -48,6 +52,7 @@ fn main() -> anyhow::Result<()> {
 
     let file = File::open_rw(&cli.input)?;
 
+    write_file_note(&file, FILE_NOTE)?;
     write_dataset_note(&file, "/circuits", CIRCUITS_NOTE)?;
     write_dataset_note(&file, "/index/uuid", UUID_NOTE)?;
     write_dataset_note(&file, "/index/label", LABEL_NOTE)?;
@@ -56,6 +61,21 @@ fn main() -> anyhow::Result<()> {
     write_dataset_note(&file, "/index/len", LEN_NOTE)?;
 
     file.close()?;
+    Ok(())
+}
+
+fn write_file_note(file: &File, note: &str) -> anyhow::Result<()> {
+    let note_data = ndarray::arr0(VarLenAscii::from_ascii(note)?);
+
+    if let Ok(attr) = file.attr("note") {
+        attr.write(&note_data)?;
+    } else {
+        file
+            .new_attr_builder()
+            .with_data(&note_data)
+            .create("note")?;
+    }
+
     Ok(())
 }
 
