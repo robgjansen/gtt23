@@ -1,7 +1,7 @@
 use hdf5::types::{FixedAscii, StringError, VarLenArray};
 use hdf5::H5Type;
 
-#[derive(H5Type, Clone, Copy, PartialEq, Debug)]
+#[derive(H5Type, Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(non_camel_case_types)]
 #[repr(i8)]
 pub enum Direction {
@@ -23,7 +23,7 @@ impl TryFrom<i8> for Direction {
     }
 }
 
-#[derive(H5Type, Clone, Copy, PartialEq, Debug)]
+#[derive(H5Type, Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(non_camel_case_types)]
 #[repr(u8)]
 pub enum CellCommand {
@@ -75,7 +75,7 @@ impl TryFrom<u8> for CellCommand {
     }
 }
 
-#[derive(H5Type, Clone, Copy, PartialEq, Debug)]
+#[derive(H5Type, Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(non_camel_case_types)]
 #[repr(u8)]
 pub enum RelayCommand {
@@ -157,7 +157,7 @@ impl TryFrom<u8> for RelayCommand {
     }
 }
 
-#[derive(H5Type, Clone, Copy, PartialEq, Debug)]
+#[derive(H5Type, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Cell {
     pub time: f64,
@@ -174,6 +174,29 @@ impl Cell {
             cell_cmd: CellCommand::PADDING,
             relay_cmd: RelayCommand::NOT_PRESENT,
         }
+    }
+}
+
+impl PartialEq for Cell {
+    fn eq(&self, other: &Self) -> bool {
+        self.time == other.time
+            && self.direction == other.direction
+            && self.cell_cmd == other.cell_cmd
+            && self.relay_cmd == other.relay_cmd
+    }
+}
+
+impl Eq for Cell {}
+
+impl PartialOrd for Cell {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Cell {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.time.total_cmp(&other.time)
     }
 }
 
