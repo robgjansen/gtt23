@@ -213,20 +213,20 @@ impl Circuit {
 
 #[derive(H5Type, Clone, Copy, PartialEq, Debug)]
 #[repr(C)]
-pub struct ShadowCircuit {
+pub struct AugmentedCircuit {
     pub uuid: FixedAscii<32>,
     pub uuid_gtt23: FixedAscii<32>,
-    pub load: f32,
+    pub aug_index: u16,
     pub len: u16,
     pub cells: [Cell; 5000],
 }
 
-impl ShadowCircuit {
+impl AugmentedCircuit {
     pub fn empty() -> Self {
         Self {
             uuid: fixedascii_null::<32>().unwrap(),
             uuid_gtt23: fixedascii_null::<32>().unwrap(),
-            load: 0.0,
+            aug_index: 0,
             len: 0,
             cells: [Cell::empty(); 5000],
         }
