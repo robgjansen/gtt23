@@ -6,20 +6,20 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hdf5 = "0.8.1"
+hdf5 = { package = "hdf5-metno", version = "0.10.0" }
 
 [dev-dependencies]
-anyhow = "1.0.75"
-clap = { version = "4.4.7", features = ["derive"] }
-env_logger = "0.10.0"
-hdf5 = { version = "0.8.1", features = ["blosc"] }
-humantime = "2.1.0"
-indicatif = "0.17.7"
-log = "0.4.20"
+anyhow = "1.0.98"
+clap = { version = "4.5.37", features = ["derive"] }
+env_logger = "0.10.2"
+hdf5 = { package = "hdf5-metno", version = "0.10.0", features = ["blosc-zstd"] }
+humantime = "2.2.0"
+indicatif = "0.17.11"
+log = "0.4.27"
 ndarray = "0.15.6"
-serde_json = "1.0.108"
-uuid = { version = "1.5.0", features = ["v4", "fast-rng"] }
-zstd = "0.13.0"
+serde_json = "1.0.140"
+uuid = { version = "1.16.0", features = ["v4", "fast-rng"] }
+zstd = "0.13.3"
 
 [lib]
 name = "gtt23"
