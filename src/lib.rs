@@ -1,6 +1,7 @@
 use hdf5::types::{FixedAscii, StringError, VarLenArray};
 use hdf5::H5Type;
 
+/// The direction that the cell was traveling.
 #[derive(H5Type, Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(non_camel_case_types)]
 #[repr(i8)]
@@ -23,6 +24,9 @@ impl TryFrom<i8> for Direction {
     }
 }
 
+/// The control command from a Tor cell.
+/// 
+/// See https://spec.torproject.org/tor-spec/cell-packet-format.html
 #[derive(H5Type, Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(non_camel_case_types)]
 #[repr(u8)]
@@ -75,6 +79,9 @@ impl TryFrom<u8> for CellCommand {
     }
 }
 
+/// The control (sub)command of a Tor Relay-type cell.
+/// 
+/// See: https://spec.torproject.org/tor-spec/relay-cells.html
 #[derive(H5Type, Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(non_camel_case_types)]
 #[repr(u8)]
@@ -95,6 +102,7 @@ pub enum RelayCommand {
     BEGIN_DIR = 13,
     EXTEND2 = 14,
     EXTENDED2 = 15,
+    /// A custom cell type used solely in the GTT23 measurement project.
     SIGNAL = 16,
     ESTABLISH_INTRO = 32,
     ESTABLISH_RENDEZVOUS = 33,
@@ -157,6 +165,7 @@ impl TryFrom<u8> for RelayCommand {
     }
 }
 
+/// The meta-data associated with a Cell observed by a Tor relay.
 #[derive(H5Type, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Cell {
@@ -167,6 +176,7 @@ pub struct Cell {
 }
 
 impl Cell {
+    /// Creates an empty `Cell` with all meta-data zeroed out.
     pub fn empty() -> Self {
         Self {
             time: 0.0,
@@ -200,19 +210,34 @@ impl Ord for Cell {
     }
 }
 
+/// The meta-data associated with a Circuit observed by a Tor relay.
 #[derive(H5Type, Clone, Copy, PartialEq, Debug)]
 #[repr(C)]
 pub struct Circuit {
+    /// A unique ID.
     pub uuid: FixedAscii<32>,
+    /// The initial first-party domain looked up on the circuit.
     pub domain: FixedAscii<44>,
+    /// The same as `domain`, but passed through `libpsl` to get the domain's
+    /// shortest private suffix.
+    /// 
+    /// See: https://rockdaboot.github.io/libpsl/libpsl-Public-Suffix-List-functions.html#psl-registrable-domain
     pub shortest_private_suffix: FixedAscii<44>,
+    /// An integer representing the day of measurement.
     pub day: u8,
+    /// An integer representing the port number used to connect to the external
+    /// server.
     pub port: u16,
+    /// The number of cells observed on the circuit, representing the valid part
+    /// of the `cells` array.
     pub len: u16,
+    /// The cells observed on the circuit. Only `cells[0..len]` are valid, the
+    /// rest are padding.
     pub cells: [Cell; 5000],
 }
 
 impl Circuit {
+    /// Creates an empty `Circuit` with all meta-data zeroed out.
     pub fn empty() -> Self {
         Self {
             uuid: fixedascii_null::<32>().unwrap(),
@@ -225,6 +250,7 @@ impl Circuit {
         }
     }
 
+    /// A string that can be used as a label for this circuit.
     pub fn label(&self) -> FixedAscii<44> {
         if self.shortest_private_suffix.is_empty() {
             self.domain
@@ -234,17 +260,23 @@ impl Circuit {
     }
 }
 
+/// A modified version of a Tor circuit used for augmentation purposes.
 #[derive(H5Type, Clone, Copy, PartialEq, Debug)]
 #[repr(C)]
 pub struct AugmentedCircuit {
     pub uuid: FixedAscii<32>,
+    /// The UUID of the `Circuit` from which this `AugmentedCircuit` was created.
     pub uuid_gtt23: FixedAscii<32>,
+    /// An integer that allows linking many augmented circuits to the same GTT23 circuit.
     pub aug_index: u16,
+    /// The same meaning as `Circuit.len`.
     pub len: u16,
+    /// The same meaning as `Circuit.cells`.
     pub cells: [Cell; 5000],
 }
 
 impl AugmentedCircuit {
+    /// Creates an empty `AugmentedCircuit` with all meta-data zeroed out.
     pub fn empty() -> Self {
         Self {
             uuid: fixedascii_null::<32>().unwrap(),
@@ -285,14 +317,16 @@ pub struct IndexArrayEntry<T: H5Type> {
     pub indexarr: VarLenArray<CircuitIndex>,
 }
 
-/// Converts `s` to a FixedAscii type, truncating `s` or right-padding with
-/// 0x0 to meet the desired fixed length.
+/// A helper to converts `s` to a FixedAscii type, truncating `s` or
+/// right-padding with 0x0 to meet the desired fixed length.
 pub fn fixedascii_from_str<const N: usize>(s: &str) -> Result<FixedAscii<N>, StringError> {
     let pad = format!("{s:\0<width$}", width = N);
     let pad_then_trunc = &pad[0..N];
     FixedAscii::<N>::from_ascii(pad_then_trunc)
 }
 
+
+/// A helper to create an empty FixedAscii string.
 pub fn fixedascii_null<const N: usize>() -> Result<FixedAscii<N>, StringError> {
     fixedascii_from_str::<N>("")
 }
