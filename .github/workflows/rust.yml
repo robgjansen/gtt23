@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  DEBIAN_FRONTEND: noninteractive
 
 jobs:
   build:
@@ -16,6 +17,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: sudo apt update && sudo apt install -y libhdf5-dev hdf5-filter-plugin hdf5-filter-plugin-blosc-serial
     - name: Build
       run: cargo build --verbose
     - name: Run tests
