@@ -1,5 +1,9 @@
 # gtt23:
 
+> [!WARNING]
+> The state of this library is `experimental` and offered without any promise of
+> support. Use at your own risk.
+
 ## What is this?
 
 This is a helper library for interacting with the GTT23 dataset in Rust.
@@ -44,8 +48,3 @@ That will give you access to the definitions in `src/lib.rs`.
 
 See the files in `examples/*.rs` for examples of how to use this library along with
 the `hdf5` Rust bindings to interact with the `gtt23.hdf5` dataset in your project.
-
-## Status
-
-The state of this library is `experimental` and offered without any promise of
-support. Use at your own risk.
