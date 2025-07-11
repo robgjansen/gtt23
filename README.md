@@ -27,7 +27,7 @@ https://doi.org/10.48550/arXiv.2404.07892
 If you find the dataset, the article, or this library useful in your own
 research, please cite our work:
 
-```
+```bibtex
 @techreport{gtt23-arxiv2024,
   title = {A Measurement of Genuine Tor Traces for Realistic Website Fingerprinting},
   author = {Jansen, Rob and Wails, Ryan and Johnson, Aaron},
